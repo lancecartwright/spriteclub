@@ -9,6 +9,8 @@
 .segment "ZEROPAGE"
 player_x:	.RES 1	;reserves 1 byte of memory for player's x coordinate
 player_y:	.RES 1  ;same but for y
+player_is_walking: .byte 0  ;not walking = 0	walking = 1
+player_walk_frame_counter: .byte 0 ;stores the frame of the player walk animation
 
 .segment "STARTUP"
 
@@ -93,19 +95,24 @@ LOADSPRITES:
 	LDA #%00011110		;show sprites and background
 	STA $2001
 
-	; inialize variables based on sprite data
+	; INITIALIZE VARIABLES
 	LDA $0203
 	STA player_x
-
 	LDA $0200
 	STA player_y
 	
 	INFLOOP:
 		JMP INFLOOP
+
 NMI: ; PPU Update Loop -- gets called every frame
 
 	LDA #$02	;LOAD SPRITE RANGE
 	STA $4014
+
+	; used for animation -- by default the player is not walking
+	; if the player is walking, the flag will be set when input is read
+	LDA #$00
+	STA player_is_walking ; mark the player as not walking
 
 	;	----------	CONTROLLER INPUTS	-----------
 	;	controller input sequence: 
@@ -158,11 +165,14 @@ NMI: ; PPU Update Loop -- gets called every frame
 		BNE DoUp
 		JMP ReadUpDone
 	DoUp:
-		LDA player_y ; get player_x into A
-		STA $0200 ; update player_x in the sprite data
+		LDA #$01
+		STA player_is_walking ; mark the player as walking
+
+		LDA player_y ; get player_y into A
+		STA $0200 ; update player_y in the sprite data
 		TAX
-		DEX ; moves the player left
-		STX player_y ; update our player_x variable
+		DEX ; moves the player up
+		STX player_y ; update our player_y variable
 	ReadUpDone:
 
 	ReadDown:
@@ -171,11 +181,14 @@ NMI: ; PPU Update Loop -- gets called every frame
 		BNE DoDown
 		JMP ReadDownDone
 	DoDown:
-		LDA player_y ; get player_x into A
-		STA $0200 ; update player_x in the sprite data
+		LDA #$01
+		STA player_is_walking ; mark the player as walking
+
+		LDA player_y ; get player_y into A
+		STA $0200 ; update player_y in the sprite data
 		TAX
-		INX ; moves the player left
-		STX player_y ; update our player_x variable
+		INX ; moves the player down
+		STX player_y ; update our player_y variable
 	ReadDownDone:
 	
 	ReadLeft:
@@ -184,15 +197,19 @@ NMI: ; PPU Update Loop -- gets called every frame
 		BNE DoLeft
 		JMP ReadLeftDone
 	DoLeft:
+		LDA #$01
+		STA player_is_walking ; mark the player as walking
+
 		LDA player_x ; get player_x into A
 		STA $0203 ; update player_x in the sprite data
 		TAX
 		DEX ; moves the player left
 		STX player_x ; update our player_x variable
+		
+		; make the player face left
 		LDA $0202 ; get attributes for flipping horizontally
 		ORA #%01000000
 		STA $0202 ; write back after ensuring sprite flip horizontal bit is 1. other bits are preserved.
-		
 	ReadLeftDone:
 
 	ReadRight:
@@ -201,15 +218,65 @@ NMI: ; PPU Update Loop -- gets called every frame
 		BNE DoRight
 		JMP ReadRightDone
 	DoRight:
+		LDA #$01
+		STA player_is_walking ; mark the player as walking
+
 		LDA player_x ; get player_x into A
 		STA $0203 ; update player_x in the sprite data
 		TAX
-		INX ; moves the player left
+		INX ; moves the player right
 		STX player_x ; update our player_x variable
+
+		; make the player face right
 		LDA $0202 ; get attributes for flipping horizontally
 		AND #%10111111
 		STA $0202 ; write back after ensuring sprite flip horizontal bit is 0. other bits are preserved.
 	ReadRightDone:
+
+	; set the player animation frames
+	LDA player_is_walking
+	BEQ player_idle_animation
+	player_walking_animation:
+		; update the frame counter
+		LDX player_walk_frame_counter
+		INX
+		STX player_walk_frame_counter
+		TXA
+
+		; A >> 3
+		; animation changes frame every 8 real frames
+		LSR
+		LSR
+		LSR
+
+		AND #%00000011
+		CMP #$02
+		BEQ player_walking_frame_2
+		AND #%00000001
+		CMP #$01
+		BEQ player_walking_frame_1
+		JMP player_walking_frame_0
+
+		player_walking_frame_0:
+			LDA #$00 ; pick frame 0
+			STA $0201 ; update the sprite
+			JMP player_animation_done
+
+		player_walking_frame_1:
+			LDA #$01 ; pick frame 0
+			STA $0201 ; update the sprite
+			JMP player_animation_done
+
+		player_walking_frame_2:
+			LDA #$02 ; pick frame 0
+			STA $0201 ; update the sprite
+			JMP player_animation_done
+
+	player_idle_animation:
+		LDA #$00 
+		STA player_walk_frame_counter ; reset the walk animation
+		STA $0201 ; reset the sprite to idle position
+	player_animation_done:
 
 	RTI
 
