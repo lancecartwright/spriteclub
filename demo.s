@@ -28,6 +28,7 @@ basic_attack_frame_counter: .byte 0
 spear_tip_tile_index: .byte 0
 spear_base_tile_index: .byte 0
 spear_swoosh_tile_index: .byte 0
+spear_is_active: .byte 0
 
 ; CHASE ENEMIES
 enemy_1_x: .RES 1
@@ -37,6 +38,8 @@ enemy_1_offset_y: .byte 0
 enemy_1_initialized: .byte 0
 enemy_1_active: .byte 0
 enemy_1_spawn_counter: .byte 0
+enemy_1_despawn_counter: .byte 0
+enemy_1_respawn_timer: .byte 0
 
 enemy_2_x: .RES 1
 enemy_2_y: .RES 1
@@ -45,6 +48,8 @@ enemy_2_offset_y: .byte 0
 enemy_2_initialized: .byte 0
 enemy_2_active: .byte 0
 enemy_2_spawn_counter: .byte 0
+enemy_2_despawn_counter: .byte 0
+enemy_2_respawn_timer: .byte 0
 
 enemy_3_x: .RES 1
 enemy_3_y: .RES 1
@@ -53,6 +58,8 @@ enemy_3_offset_y: .byte 0
 enemy_3_initialized: .byte 0
 enemy_3_active: .byte 0
 enemy_3_spawn_counter: .byte 0
+enemy_3_despawn_counter: .byte 0
+enemy_3_respawn_timer: .byte 0
 
 ; PROJECTILE ENEMIES
 enemy_4_x: .RES 1
@@ -62,6 +69,8 @@ enemy_4_target_y: .byte 0
 enemy_4_initialized: .byte 0
 enemy_4_active: .byte 0
 enemy_4_spawn_counter: .byte 0
+enemy_4_despawn_counter: .byte 0
+enemy_4_respawn_timer: .byte 0
 bone_1_vel_x: .RES 1
 bone_1_vel_y: .RES 1
 
@@ -72,6 +81,8 @@ enemy_5_target_y: .byte 0
 enemy_5_initialized: .byte 0
 enemy_5_active: .byte 0
 enemy_5_spawn_counter: .byte 0
+enemy_5_despawn_counter: .byte 0
+enemy_5_respawn_timer: .byte 0
 bone_2_vel_x: .RES 1
 bone_2_vel_y: .RES 1
 
@@ -82,6 +93,8 @@ enemy_6_target_y: .byte 0
 enemy_6_initialized: .byte 0
 enemy_6_active: .byte 0
 enemy_6_spawn_counter: .byte 0
+enemy_6_despawn_counter: .byte 0
+enemy_6_respawn_timer: .byte 0
 bone_3_vel_x: .RES 1
 bone_3_vel_y: .RES 1
 
@@ -112,6 +125,18 @@ _global_spawn_y: .RES 1
 _global_spawn_x: .RES 1
 
 seed: .RES 2 ; used for random number generation
+
+; collision subroutine variables
+_A_topleft_x: .RES 1
+_A_topleft_y: .RES 1
+_A_bottomright_x: .RES 1
+_A_bottomright_y: .RES 1
+_B_topleft_x: .RES 1
+_B_topleft_y: .RES 1
+_B_bottomright_x: .RES 1
+_B_bottomright_y: .RES 1
+
+has_collided: .RES 1
 
 .segment "STARTUP"
 
@@ -639,8 +664,9 @@ NMI: ; PPU Update Loop -- gets called every frame
 		STA player_roll_direction_x
 	player_animation_done:
 
-	; maybe TODO: update spear_tip, spear_base, and spear_swoosh locations here
 
+	LDA #0 
+	STA spear_is_active
 	LDA player_is_basic_attacking
 	BEQ intermediate_branch_4 ; goes to spear_idle_animation
 	spear_animation:
@@ -805,6 +831,9 @@ NMI: ; PPU Update Loop -- gets called every frame
 				JMP after_spear_animation
 
 		spear_attack_frame_3: ; swoosh spear
+			LDA #1
+			STA spear_is_active
+
 			LDA #$07
 			STA spear_tip_tile_index ; spear tip tile
 			LDA #$16
@@ -988,6 +1017,8 @@ NMI: ; PPU Update Loop -- gets called every frame
 			BNE enemy_1_not_ready_to_initalize
 			LDA #1
 			STA enemy_1_initialized
+			LDA #0
+			STA enemy_1_respawn_timer
 			LDA _global_spawn_x
 			STA enemy_1_x
 			STA $0223 
@@ -998,9 +1029,23 @@ NMI: ; PPU Update Loop -- gets called every frame
 			enemy_1_not_ready_to_initalize:
 			JMP enemy_1_handle_done
 		enemy_1_handle_inactive:
+			LDA enemy_1_respawn_timer
+			BNE enemy_1_wait_for_respawn
+
 			LDA enemy_1_spawn_counter
 			CMP #32
-			BNE enemy_1_spawn_animation
+			BNE enemy_1_spawn_animation ; need to spawn
+			   
+			LDA enemy_1_despawn_counter
+			BNE enemy_1_despawn_animation ; need to despawn
+
+			LDA enemy_1_respawn_timer
+			BNE enemy_1_wait_for_respawn
+
+			; preemptively set the enemy's despawn counter and respawn timer
+			LDA #16
+			STA enemy_1_despawn_counter
+
 			LDA #1
 			STA enemy_1_active
 			JMP enemy_1_handle_done
@@ -1017,6 +1062,42 @@ NMI: ; PPU Update Loop -- gets called every frame
 
 			CLC
 			ADC #$50
+			STA $0221
+			JMP enemy_1_handle_done
+		enemy_1_despawn_animation:
+			LDA enemy_1_despawn_counter 
+			TAX
+			DEX
+			CPX #0
+			BNE :+
+				LDY #100
+				STY enemy_1_respawn_timer
+				LDA _global_spawn_x
+				STA enemy_1_x
+				STA $0223 
+				LDA _global_spawn_y
+				STA enemy_1_y
+				STA $0220
+				JSR MOVE_SPAWN_POINT
+			:
+			STX enemy_1_despawn_counter ; increment the spawn counter
+			
+			LSR 
+			LSR
+			LSR
+
+			CLC
+			ADC #$50
+			STA $0221
+			JMP enemy_1_handle_done
+		enemy_1_wait_for_respawn:
+			LDA enemy_1_respawn_timer
+			TAX
+			INX
+			STX enemy_1_respawn_timer
+			LDA #0
+			STA enemy_1_spawn_counter
+			LDA #$FF
 			STA $0221
 
 		enemy_1_handle_done:
@@ -1069,6 +1150,8 @@ NMI: ; PPU Update Loop -- gets called every frame
 			BNE enemy_2_not_ready_to_initalize
 			LDA #1
 			STA enemy_2_initialized
+			LDA #0
+			STA enemy_2_respawn_timer
 			LDA _global_spawn_x
 			STA enemy_2_x
 			STA $0227 
@@ -1079,9 +1162,23 @@ NMI: ; PPU Update Loop -- gets called every frame
 			enemy_2_not_ready_to_initalize:
 			JMP enemy_2_handle_done
 		enemy_2_handle_inactive:
+			LDA enemy_2_respawn_timer
+			BNE enemy_2_wait_for_respawn
+
 			LDA enemy_2_spawn_counter
 			CMP #32
-			BNE enemy_2_spawn_animation
+			BNE enemy_2_spawn_animation ; need to spawn
+			   
+			LDA enemy_2_despawn_counter
+			BNE enemy_2_despawn_animation ; need to despawn
+
+			LDA enemy_2_respawn_timer
+			BNE enemy_2_wait_for_respawn
+
+			; preemptively set the enemy's despawn counter and respawn timer
+			LDA #16
+			STA enemy_2_despawn_counter
+
 			LDA #1
 			STA enemy_2_active
 			JMP enemy_2_handle_done
@@ -1098,6 +1195,42 @@ NMI: ; PPU Update Loop -- gets called every frame
 
 			CLC
 			ADC #$50
+			STA $0225
+			JMP enemy_2_handle_done
+		enemy_2_despawn_animation:
+			LDA enemy_2_despawn_counter 
+			TAX
+			DEX
+			CPX #0
+			BNE :+
+				LDY #100
+				STY enemy_2_respawn_timer
+				LDA _global_spawn_x
+				STA enemy_2_x
+				STA $0227 
+				LDA _global_spawn_y
+				STA enemy_2_y
+				STA $0224
+				JSR MOVE_SPAWN_POINT
+			:
+			STX enemy_2_despawn_counter ; increment the spawn counter
+			
+			LSR 
+			LSR
+			LSR
+
+			CLC
+			ADC #$50
+			STA $0225
+			JMP enemy_2_handle_done
+		enemy_2_wait_for_respawn:
+			LDA enemy_2_respawn_timer
+			TAX
+			INX
+			STX enemy_2_respawn_timer
+			LDA #0
+			STA enemy_2_spawn_counter
+			LDA #$FF
 			STA $0225
 
 		enemy_2_handle_done:
@@ -1150,6 +1283,8 @@ NMI: ; PPU Update Loop -- gets called every frame
 			BNE enemy_3_not_ready_to_initalize
 			LDA #1
 			STA enemy_3_initialized
+			LDA #0
+			STA enemy_3_respawn_timer
 			LDA _global_spawn_x
 			STA enemy_3_x
 			STA $022B 
@@ -1160,9 +1295,23 @@ NMI: ; PPU Update Loop -- gets called every frame
 			enemy_3_not_ready_to_initalize:
 			JMP enemy_3_handle_done
 		enemy_3_handle_inactive:
+			LDA enemy_3_respawn_timer
+			BNE enemy_3_wait_for_respawn
+
 			LDA enemy_3_spawn_counter
 			CMP #32
-			BNE enemy_3_spawn_animation
+			BNE enemy_3_spawn_animation ; need to spawn
+			   
+			LDA enemy_3_despawn_counter
+			BNE enemy_3_despawn_animation ; need to despawn
+
+			LDA enemy_3_respawn_timer
+			BNE enemy_3_wait_for_respawn
+
+			; preemptively set the enemy's despawn counter and respawn timer
+			LDA #16
+			STA enemy_3_despawn_counter
+
 			LDA #1
 			STA enemy_3_active
 			JMP enemy_3_handle_done
@@ -1179,6 +1328,42 @@ NMI: ; PPU Update Loop -- gets called every frame
 
 			CLC
 			ADC #$50
+			STA $0229
+			JMP enemy_3_handle_done
+		enemy_3_despawn_animation:
+			LDA enemy_3_despawn_counter 
+			TAX
+			DEX
+			CPX #0
+			BNE :+
+				LDY #100
+				STY enemy_3_respawn_timer
+				LDA _global_spawn_x
+				STA enemy_3_x
+				STA $022B 
+				LDA _global_spawn_y
+				STA enemy_3_y
+				STA $0228
+				JSR MOVE_SPAWN_POINT
+			:
+			STX enemy_3_despawn_counter ; increment the spawn counter
+			
+			LSR 
+			LSR
+			LSR
+
+			CLC
+			ADC #$50
+			STA $0229
+			JMP enemy_3_handle_done
+		enemy_3_wait_for_respawn:
+			LDA enemy_3_respawn_timer
+			TAX
+			INX
+			STX enemy_3_respawn_timer
+			LDA #0
+			STA enemy_3_spawn_counter
+			LDA #$FF
 			STA $0229
 
 		enemy_3_handle_done:
@@ -1232,9 +1417,11 @@ NMI: ; PPU Update Loop -- gets called every frame
 			BNE enemy_4_not_ready_to_initalize
 			LDA #1
 			STA enemy_4_initialized
+			LDA #0
+			STA enemy_4_respawn_timer
 			LDA _global_spawn_x
 			STA enemy_4_x
-			STA $022F 
+			STA $022F
 			LDA _global_spawn_y
 			STA enemy_4_y
 			STA $022C
@@ -1242,11 +1429,26 @@ NMI: ; PPU Update Loop -- gets called every frame
 			enemy_4_not_ready_to_initalize:
 			JMP enemy_4_handle_done
 		enemy_4_handle_inactive:
+			LDA enemy_4_respawn_timer
+			BNE enemy_4_wait_for_respawn
+
 			LDA enemy_4_spawn_counter
 			CMP #32
-			BNE enemy_4_spawn_animation
+			BNE enemy_4_spawn_animation ; need to spawn
+			   
+			LDA enemy_4_despawn_counter
+			BNE enemy_4_despawn_animation ; need to despawn
+
+			LDA enemy_4_respawn_timer
+			BNE enemy_4_wait_for_respawn
+
+			; preemptively set the enemy's despawn counter and respawn timer
+			LDA #16
+			STA enemy_4_despawn_counter
+
 			LDA #$20
 			STA $022D
+
 			LDA #1
 			STA enemy_4_active
 			JMP enemy_4_handle_done
@@ -1263,6 +1465,42 @@ NMI: ; PPU Update Loop -- gets called every frame
 
 			CLC
 			ADC #$60
+			STA $022D
+			JMP enemy_4_handle_done
+		enemy_4_despawn_animation:
+			LDA enemy_4_despawn_counter 
+			TAX
+			DEX
+			CPX #0
+			BNE :+
+				LDY #100
+				STY enemy_4_respawn_timer
+				LDA _global_spawn_x
+				STA enemy_4_x
+				STA $022F 
+				LDA _global_spawn_y
+				STA enemy_4_y
+				STA $022C
+				JSR MOVE_SPAWN_POINT
+			:
+			STX enemy_4_despawn_counter ; increment the spawn counter
+			
+			LSR 
+			LSR
+			LSR
+
+			CLC
+			ADC #$60
+			STA $022D
+			JMP enemy_4_handle_done
+		enemy_4_wait_for_respawn:
+			LDA enemy_4_respawn_timer
+			TAX
+			INX
+			STX enemy_4_respawn_timer
+			LDA #0
+			STA enemy_4_spawn_counter
+			LDA #$FF
 			STA $022D
 
 		enemy_4_handle_done:
@@ -1316,6 +1554,8 @@ NMI: ; PPU Update Loop -- gets called every frame
 			BNE enemy_5_not_ready_to_initalize
 			LDA #1
 			STA enemy_5_initialized
+			LDA #0
+			STA enemy_5_respawn_timer
 			LDA _global_spawn_x
 			STA enemy_5_x
 			STA $0233
@@ -1326,11 +1566,26 @@ NMI: ; PPU Update Loop -- gets called every frame
 			enemy_5_not_ready_to_initalize:
 			JMP enemy_5_handle_done
 		enemy_5_handle_inactive:
+			LDA enemy_5_respawn_timer
+			BNE enemy_5_wait_for_respawn
+
 			LDA enemy_5_spawn_counter
 			CMP #32
-			BNE enemy_5_spawn_animation
+			BNE enemy_5_spawn_animation ; need to spawn
+			   
+			LDA enemy_5_despawn_counter
+			BNE enemy_5_despawn_animation ; need to despawn
+
+			LDA enemy_5_respawn_timer
+			BNE enemy_5_wait_for_respawn
+
+			; preemptively set the enemy's despawn counter and respawn timer
+			LDA #16
+			STA enemy_5_despawn_counter
+
 			LDA #$20
 			STA $0231
+
 			LDA #1
 			STA enemy_5_active
 			JMP enemy_5_handle_done
@@ -1347,6 +1602,42 @@ NMI: ; PPU Update Loop -- gets called every frame
 
 			CLC
 			ADC #$60
+			STA $0231
+			JMP enemy_5_handle_done
+		enemy_5_despawn_animation:
+			LDA enemy_5_despawn_counter 
+			TAX
+			DEX
+			CPX #0
+			BNE :+
+				LDY #100
+				STY enemy_5_respawn_timer
+				LDA _global_spawn_x
+				STA enemy_5_x
+				STA $0233 
+				LDA _global_spawn_y
+				STA enemy_5_y
+				STA $0230
+				JSR MOVE_SPAWN_POINT
+			:
+			STX enemy_5_despawn_counter ; increment the spawn counter
+			
+			LSR 
+			LSR
+			LSR
+
+			CLC
+			ADC #$60
+			STA $0231
+			JMP enemy_5_handle_done
+		enemy_5_wait_for_respawn:
+			LDA enemy_5_respawn_timer
+			TAX
+			INX
+			STX enemy_5_respawn_timer
+			LDA #0
+			STA enemy_5_spawn_counter
+			LDA #$FF
 			STA $0231
 
 		enemy_5_handle_done:
@@ -1400,6 +1691,8 @@ NMI: ; PPU Update Loop -- gets called every frame
 			BNE enemy_6_not_ready_to_initalize
 			LDA #1
 			STA enemy_6_initialized
+			LDA #0
+			STA enemy_6_respawn_timer
 			LDA _global_spawn_x
 			STA enemy_6_x
 			STA $0237
@@ -1410,11 +1703,26 @@ NMI: ; PPU Update Loop -- gets called every frame
 			enemy_6_not_ready_to_initalize:
 			JMP enemy_6_handle_done
 		enemy_6_handle_inactive:
+			LDA enemy_6_respawn_timer
+			BNE enemy_6_wait_for_respawn
+
 			LDA enemy_6_spawn_counter
 			CMP #32
-			BNE enemy_6_spawn_animation
+			BNE enemy_6_spawn_animation ; need to spawn
+			   
+			LDA enemy_6_despawn_counter
+			BNE enemy_6_despawn_animation ; need to despawn
+
+			LDA enemy_6_respawn_timer
+			BNE enemy_6_wait_for_respawn
+
+			; preemptively set the enemy's despawn counter and respawn timer
+			LDA #16
+			STA enemy_6_despawn_counter
+
 			LDA #$20
 			STA $0235
+
 			LDA #1
 			STA enemy_6_active
 			JMP enemy_6_handle_done
@@ -1432,7 +1740,43 @@ NMI: ; PPU Update Loop -- gets called every frame
 			CLC
 			ADC #$60
 			STA $0235
+			JMP enemy_6_handle_done
+		enemy_6_despawn_animation:
+			LDA enemy_6_despawn_counter 
+			TAX
+			DEX
+			CPX #0
+			BNE :+
+				LDY #100
+				STY enemy_6_respawn_timer
+				LDA _global_spawn_x
+				STA enemy_6_x
+				STA $0237 
+				LDA _global_spawn_y
+				STA enemy_6_y
+				STA $0234
+				JSR MOVE_SPAWN_POINT
+			:
+			STX enemy_6_despawn_counter ; increment the spawn counter
+			
+			LSR 
+			LSR
+			LSR
 
+			CLC
+			ADC #$60
+			STA $0235
+			JMP enemy_6_handle_done
+		enemy_6_wait_for_respawn:
+			LDA enemy_6_respawn_timer
+			TAX
+			INX
+			STX enemy_6_respawn_timer
+			LDA #0
+			STA enemy_6_spawn_counter
+			LDA #$FF
+			STA $0235
+			
 		enemy_6_handle_done:
 
 	BONE_MOVEMENT:
@@ -1480,7 +1824,140 @@ NMI: ; PPU Update Loop -- gets called every frame
 	ADC bone_3_vel_y
 	STA $0240
 
-	RTI
+	ENEMY_COLLISION: 
+
+	SPEAR_COLLISION:
+		LDA spear_is_active
+		BEQ intermediate_jump6
+
+		; setup spear hitbox
+		LDA spear_tip_x
+		STA _A_topleft_x
+		CLC
+		ADC #8 
+		STA _A_bottomright_x
+		LDA spear_tip_y
+		STA _A_topleft_y
+		CLC
+		ADC #16
+		STA _A_bottomright_y
+
+		; check collision with enemy 1
+		LDA enemy_1_x
+		STA _B_topleft_x 
+		CLC 
+		ADC #8 ; hitbox is 8x8
+		STA _B_bottomright_x 
+		LDA enemy_1_y 
+		STA _B_topleft_y 
+		CLC 
+		ADC #8 ; hitbox is 8x8
+		STA _B_bottomright_y
+
+		JSR CHECK_COLLISION
+		BEQ :+ 
+		LDA #0
+		STA enemy_1_active
+		: 
+
+		; check collision with enemy 2
+		LDA enemy_2_x
+		STA _B_topleft_x 
+		CLC 
+		ADC #8 ; hitbox is 8x8
+		STA _B_bottomright_x 
+		LDA enemy_2_y 
+		STA _B_topleft_y 
+		CLC 
+		ADC #8 ; hitbox is 8x8
+		STA _B_bottomright_y
+
+		JSR CHECK_COLLISION
+		BEQ :+ 
+		LDA #0
+		STA enemy_2_active
+		: 
+
+		; check collision with enemy 3
+		LDA enemy_3_x
+		STA _B_topleft_x 
+		CLC 
+		ADC #8 ; hitbox is 8x8
+		STA _B_bottomright_x 
+		LDA enemy_3_y 
+		STA _B_topleft_y 
+		CLC 
+		ADC #8 ; hitbox is 8x8
+		STA _B_bottomright_y
+
+		JSR CHECK_COLLISION
+		BEQ :+ 
+		LDA #0
+		STA enemy_3_active
+		: 
+
+		JMP :+
+		intermediate_jump6:
+		JMP end_spear_collision_check
+		:
+
+		; check collision with enemy 4
+		LDA enemy_4_x
+		STA _B_topleft_x 
+		CLC 
+		ADC #8 ; hitbox is 8x8
+		STA _B_bottomright_x 
+		LDA enemy_4_y 
+		STA _B_topleft_y 
+		CLC 
+		ADC #8 ; hitbox is 8x8
+		STA _B_bottomright_y
+
+		JSR CHECK_COLLISION
+		BEQ :+ 
+		LDA #0
+		STA enemy_4_active
+		: 
+
+		; check collision with enemy 5
+		LDA enemy_5_x
+		STA _B_topleft_x 
+		CLC 
+		ADC #8 ; hitbox is 8x8
+		STA _B_bottomright_x 
+		LDA enemy_5_y 
+		STA _B_topleft_y 
+		CLC 
+		ADC #8 ; hitbox is 8x8
+		STA _B_bottomright_y
+
+		JSR CHECK_COLLISION
+		BEQ :+ 
+		LDA #0
+		STA enemy_5_active
+		: 
+
+		; check collision with enemy 6
+		LDA enemy_6_x
+		STA _B_topleft_x 
+		CLC 
+		ADC #8 ; hitbox is 8x8
+		STA _B_bottomright_x 
+		LDA enemy_6_y 
+		STA _B_topleft_y 
+		CLC 
+		ADC #8 ; hitbox is 8x8
+		STA _B_bottomright_y
+
+		JSR CHECK_COLLISION
+		BEQ :+ 
+		LDA #0
+		STA enemy_6_active
+		: 
+
+	end_spear_collision_check:
+
+ 	RTI
 
 ENEMY_MOVEMENT_HANDLER:
 	; frame skiper
@@ -1893,6 +2370,31 @@ MOVE_SPAWN_POINT:
 	no_overflow_spawn_point:
 	STA _global_spawn_x
 	RTS
+
+CHECK_COLLISION: 
+	; bcc for less than, beq for equal, bcs for greater than
+	LDA _A_topleft_x 
+	CMP _B_bottomright_x
+	BCS NO_COLLISION
+
+	LDA _A_bottomright_x 
+	CMP _B_topleft_x
+	BCC NO_COLLISION 
+
+	LDA _A_topleft_y 
+	CMP _B_bottomright_y
+	BCS NO_COLLISION 
+
+	LDA _A_bottomright_y
+	CMP _B_topleft_y
+	BCC NO_COLLISION
+
+	COLLISION: 
+	LDA #1
+	RTS
+	NO_COLLISION: 
+	LDA #0
+	RTS 
 
 PALETTEDATA:
 	.byte $2E, $27, $17, $15, 	$2E, $20, $07, $3B, 	$2E, $20, $2C, $1C, 	$2E, $05, $00, $20 	;background palettes
