@@ -326,17 +326,17 @@ LOADBACKGROUNDPALETTEDATA:
 
 	LOAD_MUS_DATA:
 		LDX #00
-	MUSDATALOOP:
-		LDA wismm_music_data, X
+	WISMM_DATA_LOOP:
+		LDA wismm_with_death_music_data, X
 		STA $1D00, X
 		INX
-		CPX #$F2
-		BNE MUSDATALOOP
+		CPX #$FF
+		BNE WISMM_DATA_LOOP
 
 		LDA #$01
 		;LDX #.lobyte(wismm_music_data)
 		;LDY #.hibyte(wismm_music_data)
-		LDX #$00
+		LDX #$00 ; address to which the song is written. Little endian.
 		LDY #$1D
 		JSR FamiToneInit
 
@@ -357,11 +357,35 @@ NMI: ; PPU Update Loop -- gets called every frame
 
 	LDA game_over 
 
-	BEQ :+ 
+	BEQ not_dead 
+
+	LDA #$01
+
+	LDX game_over
+
+	CPX #$02
+
+	BEQ :+
+
+	JSR FamiToneMusicPlay
+
+	:
+
+	CPX #$02
+
+	BNE :+
+
+	JSR FamiToneUpdate
+
+	:
+
+	LDA #$02
+
+	STA game_over
 
 	RTI
 	
-	:
+	not_dead:
 
 	; used for animation -- by default the player is not walking
 	; if the player is walking, the flag will be set when input is read
@@ -2699,7 +2723,7 @@ BACKGROUNDPALETTEDATA:	;32 bytes
 	.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 	
 INCLUDES:
-	.include "wismm.s"
+	.include "wismm-with-death.s"
 	.include "famitone2.s"
 	
 .segment "VECTORS"
