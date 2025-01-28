@@ -12,6 +12,6 @@ We decided to write a video game entirely in 6502 assembly for three reasons:
 
 ## If it's your first night, you have to fight.
 
-You can play the game by opening **demo.s** with an NES emulator like FCEUX.
+You can play the game by opening **demo.s** with an NES emulator like FCEUX. You can also play it on Giancarlo's [itch.io](https://bobgames1215.itch.io/sprite-club) using an online emulator, but playing it locally is definitely a better experience.
 Control the player with arrow keys according to your emulator keybinds. You can attack by pressing "F" and roll by pressing "D".
 That's it! If you die, restart and try again.
